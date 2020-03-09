@@ -23,6 +23,7 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 */
 
 #include "geometry_msgs/Twist.h"
+#include "geometry_msgs/TwistStamped.h"
 #include "ros/ros.h"
 #include "sensor_msgs/Joy.h"
 #include "teleop_twist_joy/teleop_twist_joy.h"
@@ -46,6 +47,8 @@ struct TeleopTwistJoy::Impl
 
   ros::Subscriber joy_sub;
   ros::Publisher cmd_vel_pub;
+  ros::Publisher cmd_vel_stamped_pub;
+
 
   int enable_button;
   int enable_turbo_button;
@@ -67,8 +70,10 @@ struct TeleopTwistJoy::Impl
 TeleopTwistJoy::TeleopTwistJoy(ros::NodeHandle* nh, ros::NodeHandle* nh_param)
 {
   pimpl_ = new Impl;
-
-  pimpl_->cmd_vel_pub = nh->advertise<geometry_msgs::Twist>("cmd_vel", 1, true);
+  
+  // JKM - TODO: make the topics a param , for now it is hard coded  
+  pimpl_->cmd_vel_pub = nh->advertise<geometry_msgs::Twist>("/xbox/cmd_vel", 1, true);
+  pimpl_->cmd_vel_stamped_pub = nh->advertise<geometry_msgs::TwistStamped>("/xbox/cmd_vel_stamped", 1, true);
   pimpl_->joy_sub = nh->subscribe<sensor_msgs::Joy>("joy", 1, &TeleopTwistJoy::Impl::joyCallback, pimpl_);
 
   nh_param->param<int>("enable_button", pimpl_->enable_button, 0);
@@ -142,6 +147,9 @@ void TeleopTwistJoy::Impl::sendCmdVelMsg(const sensor_msgs::Joy::ConstPtr& joy_m
 {
   // Initializes with zeros by default.
   geometry_msgs::Twist cmd_vel_msg;
+  geometry_msgs::TwistStamped cmd_vel_msg_stamped;
+
+  
 
   cmd_vel_msg.linear.x = getVal(joy_msg, axis_linear_map, scale_linear_map[which_map], "x");
   cmd_vel_msg.linear.y = getVal(joy_msg, axis_linear_map, scale_linear_map[which_map], "y");
@@ -151,34 +159,33 @@ void TeleopTwistJoy::Impl::sendCmdVelMsg(const sensor_msgs::Joy::ConstPtr& joy_m
   cmd_vel_msg.angular.x = getVal(joy_msg, axis_angular_map, scale_angular_map[which_map], "roll");
 
   cmd_vel_pub.publish(cmd_vel_msg);
-  sent_disable_msg = false;
+
+  //Get the time stamped message 
+  ros::Time current_time = ros::Time::now();
+  cmd_vel_msg_stamped.header.stamp.sec = current_time.sec;
+  cmd_vel_msg_stamped.header.stamp.nsec = current_time.nsec;
+
+  cmd_vel_msg_stamped.twist = cmd_vel_msg; // just put the same data in the stamped message
+  cmd_vel_stamped_pub.publish(cmd_vel_msg_stamped);
+  // sent_disable_msg = false;
+
+  
+
+  
+
 }
 
 void TeleopTwistJoy::Impl::joyCallback(const sensor_msgs::Joy::ConstPtr& joy_msg)
 {
-  if (enable_turbo_button >= 0 &&
-      joy_msg->buttons.size() > enable_turbo_button &&
-      joy_msg->buttons[enable_turbo_button])
-  {
-    sendCmdVelMsg(joy_msg, "turbo");
-  }
-  else if (joy_msg->buttons.size() > enable_button &&
-           joy_msg->buttons[enable_button])
+
+ 
+  // Only publish if the button is pressed 
+  if (joy_msg->buttons.size() > enable_button &&
+      joy_msg->buttons[enable_button])
   {
     sendCmdVelMsg(joy_msg, "normal");
   }
-  else
-  {
-    // When enable button is released, immediately send a single no-motion command
-    // in order to stop the robot.
-    if (!sent_disable_msg)
-    {
-      // Initializes with zeros by default.
-      geometry_msgs::Twist cmd_vel_msg;
-      cmd_vel_pub.publish(cmd_vel_msg);
-      sent_disable_msg = true;
-    }
-  }
+
 }
 
 }  // namespace teleop_twist_joy
